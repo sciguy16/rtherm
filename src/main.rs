@@ -1,8 +1,8 @@
 use color_eyre::{eyre::eyre, Result};
-use cv_convert::{FromCv, IntoCv, TryFromCv, TryIntoCv};
-use ndarray::{Array, Array2, Array3, Axis};
+use cv_convert::TryFromCv;
+use ndarray::{Array2, Array3, Axis};
 use opencv::{
-    core::{self, Range, Size, VecN, CV_8UC1},
+    core::{self, Point, Range, VecN},
     highgui,
     imgproc::{self, COLOR_YUV2BGR_YUYV, INTER_CUBIC},
     prelude::*,
@@ -49,9 +49,13 @@ fn capture_loop(mut cap: VideoCapture) -> Result<()> {
         }
         let key = highgui::wait_key(10)?;
         if key > 0 && key != 255 {
-            break Ok(());
+            break;
         }
     }
+
+    VideoCapture::release(&mut cap)?;
+
+    Ok(())
 }
 
 fn process_frame(frame: &mut Mat) -> Result<()> {
@@ -68,26 +72,6 @@ fn process_frame(frame: &mut Mat) -> Result<()> {
         &Range::new(height / 2, height)?,
         &Range::new(0, width)?,
     )?;
-
-    let centre_pixel = {
-        let px: &VecN<u8, 2> = thermdata.at_2d(96, 128)?;
-        let temp = u32::from_be_bytes([0, 0, px[1], px[0]]);
-
-        let temp = temp as f32;
-
-        temp / 64.0 - 273.15
-    };
-
-    let temp_map = therm_map_to_array(thermdata)?;
-    if let Some(max) =
-        temp_map
-            .indexed_iter()
-            .max_by(|(_point, temp_a), (_, temp_b)| {
-                temp_a.partial_cmp(temp_b).unwrap()
-            })
-    {
-        println!("Max temperature: {max:?}");
-    }
 
     let mut coloured = Mat::default();
     imgproc::cvt_color(&imdata, &mut coloured, COLOR_YUV2BGR_YUYV, 0)?;
@@ -107,6 +91,43 @@ fn process_frame(frame: &mut Mat) -> Result<()> {
 
     let mut heatmap = Mat::default();
     imgproc::apply_color_map(&resized, &mut heatmap, imgproc::COLORMAP_HOT)?;
+
+    // process the temperature map and draw a peak crosshair on image
+    let temp_map = therm_map_to_array(thermdata)?;
+    if let Some(max) =
+        temp_map
+            .indexed_iter()
+            .max_by(|(_point, temp_a), (_, temp_b)| {
+                temp_a.partial_cmp(temp_b).unwrap()
+            })
+    {
+        println!("Max temperature: {max:?}");
+        const LEN: i32 = 5;
+        let ((x, y), _temp) = max;
+        let x: i32 = x.try_into().unwrap();
+        let y: i32 = y.try_into().unwrap();
+        let width = 256i32;
+        let height = 192i32;
+
+        imgproc::line(
+            &mut heatmap,
+            Point::new(i32::max(0, x - LEN), y) * 3,
+            Point::new(i32::min(x + LEN, width), y) * 3,
+            VecN::new(255.0, 0.0, 0.0, 0.0),
+            3,
+            1,
+            0,
+        )?;
+        imgproc::line(
+            &mut heatmap,
+            Point::new(x, i32::max(0, y - LEN)) * 3,
+            Point::new(x, i32::min(y + LEN, height)) * 3,
+            VecN::new(255.0, 0.0, 0.0, 0.0),
+            3,
+            1,
+            0,
+        )?;
+    }
 
     *frame = heatmap.clone();
     Ok(())
