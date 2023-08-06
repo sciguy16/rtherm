@@ -8,4 +8,6 @@ edition = "2021"
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 color-eyre = "0.6"
-opencv = "0.84"
+cv-convert = { version = "0.23", features = ["ndarray_0-15", "opencv_0-83"] }
+ndarray = "0.15"
+opencv = "0.83"

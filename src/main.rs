@@ -1,8 +1,10 @@
 use color_eyre::{eyre::eyre, Result};
+use cv_convert::{FromCv, IntoCv, TryFromCv, TryIntoCv};
+use ndarray::{Array, Array2, Array3, Axis};
 use opencv::{
-    core::{Range, VecN},
+    core::{self, Range, Size, VecN, CV_8UC1},
     highgui,
-    imgproc::{self, COLOR_YUV2BGR_YUYV},
+    imgproc::{self, COLOR_YUV2BGR_YUYV, INTER_CUBIC},
     prelude::*,
     videoio::{self, VideoCapture},
 };
@@ -56,23 +58,18 @@ fn process_frame(frame: &mut Mat) -> Result<()> {
     let width = frame.cols();
     let height = frame.rows();
 
-    dbg!((width, height));
-
     let imdata = Mat::rowscols(
         frame,
         &Range::new(0, height / 2)?,
         &Range::new(0, width)?,
     )?;
-    dbg!(());
     let thermdata = Mat::rowscols(
         frame,
         &Range::new(height / 2, height)?,
         &Range::new(0, width)?,
     )?;
 
-    dbg!(());
     let centre_pixel = {
-        dbg!(thermdata.channels());
         let px: &VecN<u8, 2> = thermdata.at_2d(96, 128)?;
         let temp = u32::from_be_bytes([0, 0, px[1], px[0]]);
 
@@ -81,11 +78,55 @@ fn process_frame(frame: &mut Mat) -> Result<()> {
         temp / 64.0 - 273.15
     };
 
-    dbg!(centre_pixel);
+    let temp_map = therm_map_to_array(thermdata)?;
+    if let Some(max) =
+        temp_map
+            .indexed_iter()
+            .max_by(|(_point, temp_a), (_, temp_b)| {
+                temp_a.partial_cmp(temp_b).unwrap()
+            })
+    {
+        println!("Max temperature: {max:?}");
+    }
 
-    let mut disp = Mat::default();
-    imgproc::cvt_color(&imdata, &mut disp, COLOR_YUV2BGR_YUYV, 0)?;
+    let mut coloured = Mat::default();
+    imgproc::cvt_color(&imdata, &mut coloured, COLOR_YUV2BGR_YUYV, 0)?;
 
-    *frame = disp.clone();
+    let mut scaled = Mat::default();
+    core::convert_scale_abs(&coloured, &mut scaled, 1.0, 0.0)?;
+
+    let mut resized = Mat::default();
+    imgproc::resize(
+        &scaled,
+        &mut resized,
+        Default::default(),
+        3.0,
+        3.0,
+        INTER_CUBIC,
+    )?;
+
+    let mut heatmap = Mat::default();
+    imgproc::apply_color_map(&resized, &mut heatmap, imgproc::COLORMAP_HOT)?;
+
+    *frame = heatmap.clone();
     Ok(())
+}
+
+fn therm_map_to_array(thermdata: Mat) -> Result<Array2<f32>> {
+    let thermdata = Array3::<u8>::try_from_cv(thermdata).unwrap();
+
+    let mapped = thermdata.fold_axis(Axis(2), Vec::new(), |acc, ele| {
+        let mut acc = acc.clone();
+        acc.push(*ele);
+        acc
+    });
+
+    let mut mapped =
+        mapped.mapv(|ele| u32::from_be_bytes([0, 0, ele[1], ele[0]]) as f32);
+
+    mapped
+        .iter_mut()
+        .for_each(|ele| *ele = *ele / 64.0 - 273.15);
+
+    Ok(mapped)
 }
