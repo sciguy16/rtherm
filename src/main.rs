@@ -3,7 +3,6 @@ use cv_convert::TryFromCv;
 use ndarray::{Array2, Array3, Axis};
 use opencv::{
     core::{self, Point, Range, VecN},
-    highgui,
     imgproc::{self, COLOR_YUV2BGR_YUYV, INTER_CUBIC},
     prelude::*,
     videoio::{self, VideoCapture},
@@ -12,6 +11,11 @@ use opencv::{
 mod argparse;
 
 const WIN: &str = "rtherm";
+
+#[derive(Default)]
+struct AppState {
+    fps: usize,
+}
 
 fn main() -> Result<()> {
     color_eyre::install()?;
@@ -32,24 +36,20 @@ fn main() -> Result<()> {
 
     cap.set(videoio::CAP_PROP_CONVERT_RGB, 0.0)?;
 
-    highgui::named_window(WIN, highgui::WINDOW_AUTOSIZE)?;
-
     capture_loop(cap)
 }
 
 fn capture_loop(mut cap: VideoCapture) -> Result<()> {
     let mut frame = Mat::default();
+    let mut state = AppState::default();
 
     loop {
         VideoCapture::read(&mut cap, &mut frame)?;
 
         if !frame.empty() {
             process_frame(&mut frame)?;
-            highgui::imshow(WIN, &frame)?;
-        }
-        let key = highgui::wait_key(10)?;
-        if key > 0 && key != 255 {
-            break;
+            gui_overlay(&mut frame, &state)?;
+            // highgui::imshow(WIN, &frame)?;
         }
     }
 
@@ -150,4 +150,8 @@ fn therm_map_to_array(thermdata: Mat) -> Result<Array2<f32>> {
         .for_each(|ele| *ele = *ele / 64.0 - 273.15);
 
     Ok(mapped)
+}
+
+fn gui_overlay(frame: &mut Mat, state: &AppState) -> Result<()> {
+    Ok(())
 }
