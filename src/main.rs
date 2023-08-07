@@ -1,64 +1,112 @@
 use color_eyre::{eyre::eyre, Result};
+
 use cv_convert::TryFromCv;
 use ndarray::{Array2, Array3, Axis};
 use opencv::{
-    core::{self, Point, Range, VecN},
+    core::{self, Point, Range, VecN, Vector},
     imgproc::{self, COLOR_YUV2BGR_YUYV, INTER_CUBIC},
     prelude::*,
     videoio::{self, VideoCapture},
 };
 
-mod argparse;
+use eframe::egui;
+use egui_extras::RetainedImage;
 
-const WIN: &str = "rtherm";
+// mod argparse;
 
 #[derive(Default)]
 struct AppState {
     fps: usize,
+    image_frame: Mat,
+    image_png: Vector<u8>,
+    cap: Option<VideoCapture>,
+}
+
+impl AppState {
+    fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+        // Customize egui here with cc.egui_ctx.set_fonts and cc.egui_ctx.set_visuals.
+        // Restore app state using cc.storage (requires the "persistence" feature).
+        // Use the cc.gl (a glow::Context) to create graphics shaders and buffers that you can use
+        // for e.g. egui::PaintCallback.
+        Self::default()
+    }
 }
 
 fn main() -> Result<()> {
     color_eyre::install()?;
 
-    let args = argparse::Args::parse();
-    dbg!(&args);
+    // let args = argparse::Args::parse();
+    // dbg!(&args);
 
-    let mut cap = VideoCapture::from_file(
-        args.device.to_str().unwrap(),
-        videoio::CAP_ANY,
-    )?;
-    if !videoio::VideoCapture::is_opened(&cap)? {
-        return Err(eyre!(
-            "Unable to open camera at {}",
-            args.device.display()
-        ));
-    }
-
-    cap.set(videoio::CAP_PROP_CONVERT_RGB, 0.0)?;
-
-    capture_loop(cap)
-}
-
-fn capture_loop(mut cap: VideoCapture) -> Result<()> {
-    let mut frame = Mat::default();
-    let mut state = AppState::default();
-
-    loop {
-        VideoCapture::read(&mut cap, &mut frame)?;
-
-        if !frame.empty() {
-            process_frame(&mut frame)?;
-            gui_overlay(&mut frame, &state)?;
-            // highgui::imshow(WIN, &frame)?;
-        }
-    }
-
-    VideoCapture::release(&mut cap)?;
-
+    // capture_loop(cap);
+    let native_options = eframe::NativeOptions::default();
+    eframe::run_native(
+        "rtherm",
+        native_options,
+        Box::new(|cc| Box::new(AppState::new(cc))),
+    )
+    .unwrap();
     Ok(())
 }
 
-fn process_frame(frame: &mut Mat) -> Result<()> {
+impl eframe::App for AppState {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let Self {
+            fps: _,
+            image_frame,
+            image_png,
+            cap,
+        } = self;
+
+        if let Some(cap) = cap {
+            process_frame(cap, image_frame).unwrap();
+        } else {
+            match connect("/dev/video4") {
+                Ok(c) => *cap = Some(c),
+                Err(e) => println!("ERROR: {e}"),
+            }
+        }
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.heading("Hello World!");
+
+            if !image_frame.empty() {
+                opencv::imgcodecs::imencode(
+                    ".png",
+                    image_frame,
+                    image_png,
+                    &Default::default(),
+                )
+                .unwrap();
+                let texture = RetainedImage::from_image_bytes(
+                    "heatmap",
+                    image_png.as_ref(),
+                )
+                .unwrap();
+                ui.image(texture.texture_id(ctx), texture.size_vec2());
+            }
+        });
+
+        ctx.request_repaint();
+    }
+}
+
+fn connect(dev: &str) -> Result<VideoCapture> {
+    let mut cap = VideoCapture::from_file("/dev/video4", videoio::CAP_ANY)?;
+    if !videoio::VideoCapture::is_opened(&cap)? {
+        return Err(eyre!("Unable to open camera at {}", dev));
+    }
+
+    cap.set(videoio::CAP_PROP_CONVERT_RGB, 0.0)?;
+    Ok(cap)
+}
+
+fn process_frame(cap: &mut VideoCapture, frame: &mut Mat) -> Result<()> {
+    VideoCapture::read(cap, frame)?;
+    if frame.empty() {
+        return Ok(());
+    }
+
     let width = frame.cols();
     let height = frame.rows();
 

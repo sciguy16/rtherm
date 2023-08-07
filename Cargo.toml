@@ -6,8 +6,12 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = { version = "4", features = ["derive"] }
+# clap = { version = "4", features = ["derive"] }
 color-eyre = "0.6"
 cv-convert = { version = "0.23", features = ["ndarray_0-15", "opencv_0-83"] }
 ndarray = "0.15"
 opencv = "0.83"
+
+eframe = "0.22"
+egui_extras = { version = "0.22", features = ["image"] }
+image = { version = "0.24", features = ["png"] }
