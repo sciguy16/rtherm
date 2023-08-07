@@ -15,3 +15,6 @@ opencv = "0.83"
 eframe = "0.22"
 egui_extras = { version = "0.22", features = ["image"] }
 image = { version = "0.24", features = ["png"] }
+
+[profile.dev.package."*"]
+opt-level = 3

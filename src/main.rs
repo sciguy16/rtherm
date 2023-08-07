@@ -12,11 +12,13 @@ use opencv::{
 use eframe::egui;
 use egui_extras::RetainedImage;
 
+use std::time::{Duration, Instant};
+
 // mod argparse;
 
 #[derive(Default)]
 struct AppState {
-    fps: usize,
+    fps: FpsCounter,
     image_frame: Mat,
     image_png: Vector<u8>,
     cap: Option<VideoCapture>,
@@ -29,6 +31,35 @@ impl AppState {
         // Use the cc.gl (a glow::Context) to create graphics shaders and buffers that you can use
         // for e.g. egui::PaintCallback.
         Self::default()
+    }
+}
+
+struct FpsCounter {
+    fps: f32,
+    count: usize,
+    last_reset: Instant,
+}
+
+impl Default for FpsCounter {
+    fn default() -> Self {
+        Self {
+            fps: 0.0,
+            count: 0,
+            last_reset: Instant::now(),
+        }
+    }
+}
+
+impl FpsCounter {
+    pub fn tick(&mut self) {
+        self.count += 1;
+
+        let elapsed = self.last_reset.elapsed().as_millis();
+        if elapsed > 1000 {
+            self.last_reset = Instant::now();
+            self.fps = 1000.0 * self.count as f32 / elapsed as f32;
+            self.count = 0;
+        }
     }
 }
 
@@ -52,11 +83,12 @@ fn main() -> Result<()> {
 impl eframe::App for AppState {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let Self {
-            fps: _,
+            fps,
             image_frame,
             image_png,
             cap,
         } = self;
+        fps.tick();
 
         if let Some(cap) = cap {
             process_frame(cap, image_frame).unwrap();
@@ -69,6 +101,7 @@ impl eframe::App for AppState {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Hello World!");
+            ui.label(format!("fps: {:.2}", fps.fps));
 
             if !image_frame.empty() {
                 opencv::imgcodecs::imencode(
